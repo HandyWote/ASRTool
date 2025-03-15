@@ -96,9 +96,6 @@ print(result.text)  # 输出识别文本
 result = transcribe("audio.wav", "jianying")
 result.save_srt("output.srt")  # 保存为SRT字幕
 
-# 使用Whisper进行识别
-result = transcribe("audio.m4a", "whisper")
-result.save_txt("output.txt")  # 保存为文本文件
 ```
 
 3. 图形界面使用
