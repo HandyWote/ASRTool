@@ -40,7 +40,7 @@ graph TB
 
     subgraph 音频处理
         direction TB
-        C1 & C2 & C4 --> D[加载音频文件]
+        C1 & C2  --> D[加载音频文件]
         D --> E[计算CRC32校验和]
         E --> F{检查缓存}
         F -->|命中| G[返回ASRData]
