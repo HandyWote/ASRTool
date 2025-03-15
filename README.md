@@ -27,38 +27,45 @@
 ## 功能流程
 
 ```mermaid
-flowchart TB
-    A[用户调用 transcribe(audio_file, platform)] --> B{选择平台}
+graph TB
+    Start[开始] --> Mode{选择模式}
+    Mode -->|普通模式| A[选择音频文件]
+    Mode -->|录音模式| Rec[开始录音]
+    Rec --> Stop[停止录音]
+    Stop --> A
+
+    A --> B{选择平台}
     B -->|Bcut| C1[BcutASR]
     B -->|JianYing| C2[JianYingASR]
     B -->|Whisper| C4[WhisperASR]
 
     subgraph 音频处理
-        C1 --> D[加载音频文件]
-        C2 --> D
-        C4 --> D
+        direction TB
+        C1 & C2 & C4 --> D[加载音频文件]
         D --> E[计算CRC32校验和]
         E --> F{检查缓存}
-        F -->|命中缓存| G[直接返回ASRData]
+        F -->|命中| G[返回ASRData]
         F -->|未命中| H[调用API识别]
     end
 
     subgraph API交互
-        H --> I1[分片上传音频<br>（Bcut/JianYing）]
-        H --> I2[直接提交音频<br>（Whisper）]
-        I1 --> J[轮询任务状态]
-        I2 --> J
-        J --> K[获取原始响应数据]
+        direction TB
+        H --> I1[分片上传音频]
+        H --> I2[直接提交音频]
+        I1 & I2 --> J[轮询任务状态]
+        J --> K[获取响应数据]
     end
 
     subgraph 数据解析
-        K --> L[_make_segments解析为ASRDataSeg列表]
-        L --> M[生成ASRData实例]
-        M --> N[保存结果到缓存]
+        direction TB
+        K --> L[解析ASRDataSeg]
+        L --> M[生成ASRData]
+        M --> N[保存到缓存]
         N --> G
     end
 
-    G --> O[输出字幕文件或文本]
+    G --> O[输出字幕/文本]
+    O --> End[结束]
 ```
 
 ## 主要特性
