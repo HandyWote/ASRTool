@@ -4,6 +4,8 @@ import os
 import zlib
 import tempfile
 import threading
+import requests
+from typing import Optional, Dict
 
 from .ASRData import ASRDataSeg, ASRData
 
@@ -84,6 +86,50 @@ class BaseASR:
     def _run(self) -> dict:
         """ Run the ASR service and return the response data. """
         raise NotImplementedError("_run method must be implemented in subclass")
+        
+    def _make_http_request(self, method: str, url: str, **kwargs) -> requests.Response:
+        """统一的HTTP请求处理
+        
+        Args:
+            method: HTTP方法 (GET, POST, PUT等)
+            url: 请求URL
+            **kwargs: 请求参数
+            
+        Returns:
+            Response对象
+            
+        Raises:
+            requests.exceptions.RequestException: 当请求失败时
+        """
+        try:
+            response = requests.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.RequestException as e:
+            logging.error(f"HTTP请求失败: {e}")
+            raise
+            
+    def _handle_response(self, response: requests.Response, error_msg: str = "请求失败") -> dict:
+        """统一的响应处理
+        
+        Args:
+            response: Response对象
+            error_msg: 错误信息
+            
+        Returns:
+            解析后的JSON数据
+            
+        Raises:
+            ValueError: 当响应状态异常或解析失败时
+        """
+        try:
+            data = response.json()
+            if not isinstance(data, dict):
+                raise ValueError(f"{error_msg}: 响应格式错误")
+            return data
+        except (ValueError, json.JSONDecodeError) as e:
+            logging.error(f"{error_msg}: {e}")
+            raise ValueError(f"{error_msg}: {str(e)}")
 
 
 

@@ -13,14 +13,13 @@ from .ASRData import ASRDataSeg
 from .BaseASR import BaseASR
 
 
-# from ASRData import ASRDataSeg
-# from BaseASR import BaseASR
+
 
 class JianYingASR(BaseASR):
     def __init__(self, audio_path: Union[str, bytes], use_cache: bool = False, need_word_time_stamp: bool = False,
                  start_time: float = 0, end_time: float = 6000):
         super().__init__(audio_path, use_cache)
-        self.audio_path = audio_path
+
         self.end_time = end_time
         self.start_time = start_time
 
@@ -144,7 +143,7 @@ class JianYingASR(BaseASR):
             'tdid': self.tdid,
         }
 
-    def _uplosd_headers(self):
+    def _upload_headers(self):
         headers = {
             'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36 Thea/1.0.1",
             'Authorization': self.auth,
@@ -159,9 +158,8 @@ class JianYingASR(BaseASR):
         sign, device_time = self._generate_sign_parameters(url='/lv/v1/upload_sign', pf='4', appvr='4.0.0',
                                                            tdid=self.tdid)
         headers = self._build_headers(device_time, sign)
-        response = requests.post(url, data=payload, headers=headers)
-        response.raise_for_status()
-        login_data = response.json()
+        response = self._make_http_request('POST', url, data=payload, headers=headers)
+        login_data = self._handle_response(response, '获取上传签名失败')
         self.access_key = login_data['data']['access_key_id']
         self.secret_key = login_data['data']['secret_access_key']
         self.session_token = login_data['data']['session_token']
@@ -193,13 +191,12 @@ class JianYingASR(BaseASR):
         self.upload_id = store_infos['Result']['UploadAddress']['StoreInfos'][0]['UploadID']
         self.session_key = store_infos['Result']['UploadAddress']['SessionKey']
         self.upload_hosts = store_infos['Result']['UploadAddress']['UploadHosts'][0]
-        self.store_uri = store_infos['Result']['UploadAddress']['StoreInfos'][0]['StoreUri']
         return store_infos
 
     def _upload_file(self):
         """Upload the file"""
         url = f"https://{self.upload_hosts}/{self.store_uri}?partNumber=1&uploadID={self.upload_id}"
-        headers = self._uplosd_headers()
+        headers = self._upload_headers()
         response = requests.put(url, data=self.file_binary, headers=headers)
         resp_data = response.json()
         assert resp_data['success'] == 0, f"File upload failed: {response.text}"
@@ -209,7 +206,7 @@ class JianYingASR(BaseASR):
         """Check upload result"""
         url = f"https://{self.upload_hosts}/{self.store_uri}?uploadID={self.upload_id}"
         payload = f"1:{self.crc32_hex}"
-        headers = self._uplosd_headers()
+        headers = self._upload_headers()
         response = requests.post(url, data=payload, headers=headers)
         resp_data = response.json()
         return resp_data
@@ -217,7 +214,7 @@ class JianYingASR(BaseASR):
     def _upload_commit(self):
         """Commit the uploaded file"""
         url = f"https://{self.upload_hosts}/{self.store_uri}?uploadID={self.upload_id}&partNumber=1&x-amz-security-token={self.session_token}"
-        headers = self._uplosd_headers()
+        headers = self._upload_headers()
         response = requests.put(url, data=self.file_binary, headers=headers)
         return self.store_uri
 

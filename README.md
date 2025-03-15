@@ -1,93 +1,121 @@
+# AsrTools
 
-**注意：更多强大功能已经在我另一个项目实现:**
+> 本项目基于 [WEIFENG2333/AsrTools](https://github.com/WEIFENG2333/AsrTools) 项目修改，在原有基础上增加了录音模式、优化了缓存机制，并提供了更友好的用户界面。
 
- [VideoCaptioner](https://github.com/WEIFENG2333/VideoCaptioner) 基于 LLM 的智能字幕助手，无需GPU一键高质量字幕视频合成！支持生成、断句、优化、翻译全流程。让视频字幕制作简单高效！
+## 项目说明
 
+本项目是一个多平台语音识别工具。项目采用模块化设计，便于扩展和维护。主要提供以下功能：
 
-# 🎤 AsrTools
+- **普通模式**：支持对本地音频文件进行语音识别，自动生成字幕文本
+- **录音模式**：支持实时录音并进行语音识别，适用于会议记录、实时字幕等场景
+- **字幕导出**：支持将识别结果导出为多种字幕格式，如SRT、TXT等
 
-## 🌟 **特色功能**
+## 技术原理
 
-- 🚀 **无需复杂配置**：无需 GPU 和繁琐的本地配置，小白也能轻松使用。
-- 🖥️ **高颜值界面**：基于 **PyQt5** 和 **qfluentwidgets**，界面美观且用户友好。
-- ⚡ **效率超人**：多线程并发 + 批量处理，文字转换快如闪电。
-- 📄 **多格式支持**：支持生成 `.srt` 和 `.txt` 、`ass`字幕文件，满足不同需求。
+项目采用统一的ASR（自动语音识别）接口设计，通过工厂模式动态创建不同平台的ASR实例。主要技术特点：
 
-欢迎为项目给上一个 Star ⭐ 。
+1. **模块化ASR引擎**：
+   - BaseASR：定义统一的ASR接口
+   - BcutASR：必剪语音识别实现
+   - JianYingASR：剪映语音识别实现
 
-**主界面截图示例：**
+2. **智能缓存机制**：
+   - 使用CRC32对音频文件进行校验
+   - 缓存识别结果，避免重复识别
+   - 支持缓存过期和手动清理
 
-<img src="resources/main_window-1.1.0.png" width="80%" alt="主界面">
+## 功能流程
 
+```mermaid
+flowchart TB
+    A[用户调用 transcribe(audio_file, platform)] --> B{选择平台}
+    B -->|Bcut| C1[BcutASR]
+    B -->|JianYing| C2[JianYingASR]
+    B -->|Whisper| C4[WhisperASR]
 
-## 🌟 未来计划（TODO）
+    subgraph 音频处理
+        C1 --> D[加载音频文件]
+        C2 --> D
+        C4 --> D
+        D --> E[计算CRC32校验和]
+        E --> F{检查缓存}
+        F -->|命中缓存| G[直接返回ASRData]
+        F -->|未命中| H[调用API识别]
+    end
 
-- 🎥 视频直接处理(完成)：支持输入视频文件自动转换为音频文件，无需用户手动转换为mp3等音频格式。
-- 📄 多样化输出(完成)：增加输出格式选择，提供更多字幕格式选项，满足不同用户需求。
-- 🔀 一键字幕视频：增加视频自动加字幕功能，一键完成从视频到带字幕视频的全流程。
-- 🔗 API 集成：提供 API 接口，允许开发者将 AsrTools 集成到自己的工作流程中。
-- ✏️ 字幕编辑器：集成一个简单的字幕编辑界面，允许用户直接修改、调整时间轴和校正识别错误。
+    subgraph API交互
+        H --> I1[分片上传音频<br>（Bcut/JianYing）]
+        H --> I2[直接提交音频<br>（Whisper）]
+        I1 --> J[轮询任务状态]
+        I2 --> J
+        J --> K[获取原始响应数据]
+    end
 
- 以上计划均已经实现，请访问 [VideoCaptioner](https://github.com/WEIFENG2333/VideoCaptioner)
+    subgraph 数据解析
+        K --> L[_make_segments解析为ASRDataSeg列表]
+        L --> M[生成ASRData实例]
+        M --> N[保存结果到缓存]
+        N --> G
+    end
 
+    G --> O[输出字幕文件或文本]
+```
 
-### 🖥️ **快速上手**
+## 主要特性
 
-1. **启动应用**：运行下载的可执行文件或通过命令行启动 GUI 界面。
-2. **选择 ASR 引擎**：在下拉菜单中选择你需要使用的 ASR 引擎。
-3. **添加文件**：点击“选择文件”按钮或将文件/文件夹拖拽到指定区域。
-4. **开始处理**：点击“开始处理”按钮，程序将自动开始转换，并在完成后在原音频目录生成 `.srt` 或 `.txt` 字幕文件。（默认保持 3 个线程运行）
+- 多平台支持：支持必剪、剪映和Whisper等多个语音识别平台
+- 缓存机制：通过CRC32校验实现音频识别结果缓存
+- 模块化设计：统一的ASR接口，便于扩展新的识别平台
+- 音频格式支持：支持wav、mp3、m4a、flac等多种音频格式
+- 实时录音：支持实时录音并识别，可用于会议记录
+- 友好界面：提供图形用户界面，操作简单直观
+- 字幕格式：支持多种字幕格式导出
 
-## 🛠️ **安装指南**
+## 使用说明
 
-###  **1. 从发布版本安装**
+1. 安装依赖
+```bash
+pip install -r requirements.txt
+```
 
-我为 Windows 用户提供了打包好的[Release](https://github.com/WEIFENG2333/AsrTools/releases)版本，下载后解压即可直接使用，无需配置环境。
+2. 命令行使用
+```python
+from bk_asr import transcribe
 
-或者从网盘下载： [https://wwwm.lanzoue.com/iUJYZ2clk7xg](https://wwwm.lanzoue.com/iPKZV2eh5ina)
+# 使用必剪平台进行识别
+result = transcribe("audio.mp3", "bcut")
+print(result.text)  # 输出识别文本
 
-运行解压后的 `AsrTools.exe`，即可启动 GUI 界面。
+# 使用剪映平台进行识别
+result = transcribe("audio.wav", "jianying")
+result.save_srt("output.srt")  # 保存为SRT字幕
 
+# 使用Whisper进行识别
+result = transcribe("audio.m4a", "whisper")
+result.save_txt("output.txt")  # 保存为文本文件
+```
 
-###  **2. 从源码安装（开发者）**
+3. 图形界面使用
+```bash
+# 启动GUI程序
+python asr_gui.py
+```
 
-项目的依赖仅仅为 `requests`。
+4. 录音模式
+```python
+from audio.audio_recorder import AudioRecorder
+from bk_asr import transcribe
 
-如果您需要 GUI 界面，请额外安装 `PyQt5`, `qfluentwidgets`。
+# 创建录音实例
+recorder = AudioRecorder()
 
-如果您想从源码运行，请按照以下步骤操作：
+# 开始录音
+recorder.start_recording("record.wav")
 
-1. **克隆仓库并进入项目目录**
+# 停止录音
+recorder.stop_recording()
 
-    ```bash
-    git clone https://github.com/WEIFENG2333/AsrTools.git
-    cd AsrTools
-    ```
-
-2. **安装依赖并运行**
-
-    - **启动 GUI 界面**
-
-        ```bash
-        pip install -r requirements.txt
-        python asr_gui.py
-        ```
----
-
-## 日志
--  **（v1.1.0）已经增加视频文件支持🎥**：支持直接导入视频文件，自动转换为音频进行处理，无需手动转换。
-
-## 📬 **联系与支持**
-
-- **Issues**：[提交问题](https://github.com/WEIFENG2333/AsrTools/issues)
-
-感谢您使用 **AsrTools**！🎉  
-
-目前项目的相关调用和GUI页面的功能仍在不断完善中...
-
-希望这款工具能为您带来便利。😊
-
----
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=WEIFENG2333/AsrTools&type=Date)](https://star-history.com/#WEIFENG2333/AsrTools&Date)
+# 识别录音文件
+result = transcribe("record.wav", "whisper")
+print(result.text)
+```

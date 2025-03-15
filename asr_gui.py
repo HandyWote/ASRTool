@@ -11,17 +11,16 @@ plugin_path = os.path.join(sys.prefix, 'Lib', 'site-packages', 'PyQt5', 'Qt5', '
 os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = plugin_path
 
 from PyQt5.QtCore import Qt, QRunnable, QThreadPool, QObject, pyqtSignal as Signal, pyqtSlot as Slot, QSize, QThread, \
-    pyqtSignal
+    pyqtSignal, QTimer
 from PyQt5.QtGui import QCursor, QColor, QFont
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
                              QTableWidgetItem, QHeaderView, QSizePolicy)
 from qfluentwidgets import (ComboBox, PushButton, LineEdit, TableWidget, FluentIcon as FIF,
                             Action, RoundMenu, InfoBar, InfoBarPosition,
-                            FluentWindow, BodyLabel, MessageBox)
-
+                            FluentWindow, BodyLabel, MessageBox, ProgressBar)
 from bk_asr.BcutASR import BcutASR
 from bk_asr.JianYingASR import JianYingASR
-from bk_asr.KuaiShouASR import KuaiShouASR
+from bk_asr.ASRData import ASRDataSeg
 
 # 设置日志配置
 logging.basicConfig(
@@ -67,12 +66,7 @@ class ASRWorker(QRunnable):
                 asr = BcutASR(self.audio_path, use_cache=use_cache)
             elif self.asr_engine == 'J 接口':
                 asr = JianYingASR(self.audio_path, use_cache=use_cache)
-            elif self.asr_engine == 'K 接口':
-                asr = KuaiShouASR(self.audio_path, use_cache=use_cache)
-            elif self.asr_engine == 'Whisper':
-                # from bk_asr.WhisperASR import WhisperASR
-                # asr = WhisperASR(self.file_path, use_cache=use_cache)
-                raise NotImplementedError("WhisperASR 暂未实现")
+            # Whisper选项已移除
             else:
                 raise ValueError(f"未知的 ASR 引擎: {self.asr_engine}")
 
@@ -97,43 +91,38 @@ class ASRWorker(QRunnable):
             logging.error(f"处理文件 {self.file_path} 时出错: {str(e)}")
             self.signals.errno.emit(self.file_path, f"处理时出错: {str(e)}")
 
-class UpdateCheckerThread(QThread):
-    msg = pyqtSignal(str, str, str)  # 用于发送消息的信号
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-    def run(self):
-        try:
-            from check_update import check_update, check_internet_connection
-            # 检查互联网连接
-            if not check_internet_connection():
-                self.msg.emit("错误", "无法连接到互联网，请检查网络连接。", "")
-                return
-            # 检查更新
-            config = check_update(self)
-            if config:
-                if config['fource']:
-                    self.msg.emit("更新", "检测到新版本，请下载最新版本。", config['update_download_url'])
-                else:
-                    self.msg.emit("可更新", "检测到新版本，请下载最新版本。", config['update_download_url'])
-        except Exception as e:
-            pass
-
 
 class ASRWidget(QWidget):
     """ASR处理界面"""
 
     def __init__(self):
         super().__init__()
-        self.init_ui()
         self.max_threads = 3  # 设置最大线程数
         self.thread_pool = QThreadPool()
         self.thread_pool.setMaxThreadCount(self.max_threads)
         self.processing_queue = []
         self.workers = {}  # 维护文件路径到worker的映射
+        self.audio_recorder = None
+        self.duration_timer = QTimer()
+        self.duration_timer.timeout.connect(self.update_duration)
+        self.stream_asr = None  # 流式ASR实例
+        self.init_ui()
+        
+        self.record_widget.setVisible(False)
+        self.file_widget.setVisible(True)
 
-
+    def setObjectName(self, name):
+        """重写 setObjectName 以在名称变更时更新界面"""
+        super().setObjectName(name)
+        self.update_interface_mode()
+        
+    def update_interface_mode(self):
+        """根据 objectName 更新界面模式"""
+        is_record_mode = self.objectName() == "record"
+        self.record_widget.setVisible(is_record_mode)
+        self.file_widget.setVisible(not is_record_mode)
+        self.adjustSize()
+        
     def init_ui(self):
         layout = QVBoxLayout(self)
 
@@ -142,7 +131,7 @@ class ASRWidget(QWidget):
         engine_label = BodyLabel("选择接口:", self)
         engine_label.setFixedWidth(70)
         self.combo_box = ComboBox(self)
-        self.combo_box.addItems(['B 接口', 'J 接口', 'K 接口', 'Whisper'])
+        self.combo_box.addItems(['B 接口', 'J 接口'])
         engine_layout.addWidget(engine_label)
         engine_layout.addWidget(self.combo_box)
         layout.addLayout(engine_layout)
@@ -152,13 +141,42 @@ class ASRWidget(QWidget):
         format_label = BodyLabel("导出格式:", self)
         format_label.setFixedWidth(70)
         self.format_combo = ComboBox(self)
-        self.format_combo.addItems(['SRT', 'TXT', 'ASS'])
+        self.format_combo.addItems(['TXT', 'SRT', 'ASS'])
         format_layout.addWidget(format_label)
         format_layout.addWidget(self.format_combo)
         layout.addLayout(format_layout)
 
+
+
+
+        # 录音控制按钮
+        self.record_widget = QWidget(self)
+        self.record_layout = QHBoxLayout(self.record_widget)
+        
+        # 添加录音时长显示
+        self.duration_label = BodyLabel("00:00", self)
+        self.duration_label.setFixedWidth(60)
+        self.record_layout.addWidget(self.duration_label)
+        
+        # 添加音量指示器
+        self.volume_indicator = ProgressBar(self)
+        self.volume_indicator.setFixedWidth(100)
+        self.volume_indicator.setRange(0, 100)
+        self.record_layout.addWidget(self.volume_indicator)
+        
+        self.start_record_button = PushButton("开始录音", self)
+        self.stop_record_button = PushButton("停止录音", self)
+        self.start_record_button.clicked.connect(self.start_recording)
+        self.stop_record_button.clicked.connect(self.stop_recording)
+        self.record_layout.addWidget(self.start_record_button)
+        self.record_layout.addWidget(self.stop_record_button)
+        self.stop_record_button.setEnabled(False)
+        self.record_widget.setVisible(True)
+        layout.addWidget(self.record_widget)
+
         # 文件选择区域
-        file_layout = QHBoxLayout()
+        self.file_widget = QWidget(self)
+        file_layout = QHBoxLayout(self.file_widget)
         self.file_input = LineEdit(self)
         self.file_input.setPlaceholderText("拖拽文件或文件夹到这里")
         self.file_input.setReadOnly(True)
@@ -166,7 +184,7 @@ class ASRWidget(QWidget):
         self.file_button.clicked.connect(self.select_file)
         file_layout.addWidget(self.file_input)
         file_layout.addWidget(self.file_button)
-        layout.addLayout(file_layout)
+        layout.addWidget(self.file_widget)
 
         # 文件列表表格
         self.table = TableWidget(self)
@@ -191,6 +209,100 @@ class ASRWidget(QWidget):
 
         self.setAcceptDrops(True)
 
+    def on_stream_mode_changed(self, text):
+        """处理录音模式切换"""
+        # 显示/隐藏录音控制按钮和文件选择区域
+        self.record_widget.setVisible(text == '录音模式')
+        self.file_widget.setVisible(text != '录音模式')
+        
+        # 清空文件列表
+        if text == '录音模式':
+            self.table.setRowCount(0)
+            self.update_start_button_state()
+
+    def start_recording(self):
+        """开始录音"""
+        from audio.audio_recorder import AudioRecorder
+        
+        if not self.audio_recorder:
+            self.audio_recorder = AudioRecorder()
+            self.audio_recorder.set_volume_callback(self.update_volume)
+        
+        self.audio_recorder.start()
+        self.duration_timer.start(1000)  # 每秒更新一次时长
+        self.start_record_button.setEnabled(False)
+        self.stop_record_button.setEnabled(True)
+
+    def stop_recording(self):
+        """停止录音并自动处理生成的音频文件"""
+        if self.audio_recorder:
+            output_path = self.audio_recorder.stop()
+            
+            if output_path:
+                self.add_file_to_table(output_path)
+                InfoBar.success(
+                    title='录音完成',
+                    content=f"录音已保存到: {output_path}",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=3000,
+                    parent=self
+                )
+                
+                # 自动处理生成的音频文件
+                if self.objectName() == 'record':
+                    # 使用当前选择的引擎和格式自动处理录音文件
+                    self.process_file(output_path)
+                    InfoBar.info(
+                        title='自动处理',
+                        content=f"正在使用{self.combo_box.currentText()}引擎处理录音文件",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+            
+            self.duration_timer.stop()
+            self.duration_label.setText("00:00")
+            self.volume_indicator.setValue(0)
+            self.start_record_button.setEnabled(True)
+            self.stop_record_button.setEnabled(False)
+
+    def on_stream_result(self, segment: ASRDataSeg):
+        """处理流式识别结果
+        
+        Args:
+            segment: 识别结果片段
+        """
+        # 在表格中显示识别结果
+        row_count = self.table.rowCount()
+        self.table.insertRow(row_count)
+        
+        # 添加时间戳和文本
+        time_text = f"{segment.start//1000:02d}:{(segment.start%1000)//10:02d} -> {segment.end//1000:02d}:{(segment.end%1000)//10:02d}"
+        time_item = QTableWidgetItem(time_text)
+        text_item = QTableWidgetItem(segment.text)
+        
+        self.table.setItem(row_count, 0, time_item)
+        self.table.setItem(row_count, 1, text_item)
+        
+        # 滚动到最新的行
+        self.table.scrollToBottom()
+
+    def update_duration(self):
+        """更新录音时长显示"""
+        if self.audio_recorder:
+            duration = int(self.audio_recorder.get_duration())
+            minutes = duration // 60
+            seconds = duration % 60
+            self.duration_label.setText(f"{minutes:02d}:{seconds:02d}")
+
+    def update_volume(self, volume: float):
+        """更新音量显示"""
+        self.volume_indicator.setValue(int(volume * 100))
+
     def select_file(self):
         """选择文件对话框"""
         files, _ = QFileDialog.getOpenFileNames(self, "选择音频或视频文件", "",
@@ -201,10 +313,13 @@ class ASRWidget(QWidget):
 
     def add_file_to_table(self, file_path):
         """将文件添加到表格中"""
-        if self.find_row_by_file_path(file_path) != -1:
+        # 转换为绝对路径
+        abs_path = os.path.abspath(file_path)
+        
+        if self.find_row_by_file_path(abs_path) != -1:
             InfoBar.warning(
                 title='文件已存在',
-                content=f"文件 {os.path.basename(file_path)} 已经添加到列表中。",
+                content=f"文件 {os.path.basename(abs_path)} 已经添加到列表中。",
                 orient=Qt.Horizontal,
                 isClosable=True,
                 position=InfoBarPosition.TOP,
@@ -215,12 +330,19 @@ class ASRWidget(QWidget):
 
         row_count = self.table.rowCount()
         self.table.insertRow(row_count)
-        item_filename = self.create_non_editable_item(os.path.basename(file_path))
-        item_status = self.create_non_editable_item("未处理")
-        item_status.setForeground(QColor("gray"))
-        self.table.setItem(row_count, 0, item_filename)
-        self.table.setItem(row_count, 1, item_status)
-        item_filename.setData(Qt.UserRole, file_path)
+        
+        # 使用QTableWidgetItem的setData方法存储完整路径
+        filename_item = self.create_non_editable_item(os.path.basename(abs_path))
+        filename_item.setData(Qt.UserRole, abs_path)  # 存储完整路径
+        
+        status_item = self.create_non_editable_item("未处理")
+        status_item.setForeground(QColor("gray"))
+        
+        self.table.setItem(row_count, 0, filename_item)
+        self.table.setItem(row_count, 1, status_item)
+        
+        # 更新开始处理按钮状态
+        self.update_start_button_state()
 
     def create_non_editable_item(self, text):
         """创建不可编辑的表格项"""
@@ -315,6 +437,7 @@ class ASRWidget(QWidget):
 
     def process_files(self):
         """处理所有未处理的文件"""
+
         for row in range(self.table.rowCount()):
             if self.table.item(row, 1).text() == "未处理":
                 file_path = self.table.item(row, 0).data(Qt.UserRole)
@@ -428,45 +551,28 @@ class ASRWidget(QWidget):
         self.update_start_button_state()
 
 
-class InfoWidget(QWidget):
-    """个人信息界面"""
 
-    def __init__(self):
+
+class ModeWidget(QWidget):
+    """模式选择界面"""
+    def __init__(self, asr_widget):
         super().__init__()
+        self.asr_widget = asr_widget
         self.init_ui()
 
     def init_ui(self):
-        # GitHub URL 和仓库描述
-        GITHUB_URL = "https://github.com/WEIFENG2333/AsrTools"
-        REPO_DESCRIPTION = """
-    🚀 无需复杂配置：无需 GPU 和繁琐的本地配置，小白也能轻松使用。
-    🖥️ 高颜值界面：基于 PyQt5 和 qfluentwidgets，界面美观且用户友好。
-    ⚡ 效率超人：多线程并发 + 批量处理，文字转换快如闪电。
-    📄 多格式支持：支持生成 .srt 和 .txt 字幕文件，满足不同需求。
-        """
-        
-        main_layout = QVBoxLayout(self)
-        main_layout.setAlignment(Qt.AlignTop)
-        # main_layout.setSpacing(50)
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignTop)
 
-        # 标题
-        title_label = BodyLabel("  ASRTools", self)
-        title_label.setFont(QFont("Segoe UI", 30, QFont.Bold))
-        title_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title_label)
+        # 模式选择
+        mode_label = BodyLabel("识别模式", self)
+        mode_label.setFont(QFont("Segoe UI", 20, QFont.Bold))
+        layout.addWidget(mode_label)
 
-        # 仓库描述区域
-        desc_label = BodyLabel(REPO_DESCRIPTION, self)
-        desc_label.setFont(QFont("Segoe UI", 12))
-        main_layout.addWidget(desc_label)
-
-        github_button = PushButton("GitHub 仓库", self)
-        github_button.setIcon(FIF.GITHUB)
-        github_button.setIconSize(QSize(20, 20))
-        github_button.setMinimumHeight(42)
-        github_button.clicked.connect(lambda _: webbrowser.open(GITHUB_URL))
-        main_layout.addWidget(github_button)
-
+        self.mode_combo = ComboBox(self)
+        self.mode_combo.addItems(['普通模式', '录音模式'])
+        self.mode_combo.currentTextChanged.connect(self.asr_widget.on_stream_mode_changed)
+        layout.addWidget(self.mode_combo)
 
 class MainWindow(FluentWindow):
     """主窗口"""
@@ -474,29 +580,16 @@ class MainWindow(FluentWindow):
         super().__init__()
         self.setWindowTitle('ASR Processing Tool')
 
-        # ASR 处理界面
+        # 普通模式界面
         self.asr_widget = ASRWidget()
-        self.asr_widget.setObjectName("main")
-        self.addSubInterface(self.asr_widget, FIF.ALBUM, 'ASR Processing')
+        self.asr_widget.setObjectName("normal")
+        self.addSubInterface(self.asr_widget, FIF.DOCUMENT, '普通模式')
 
-        # 个人信息界面
-        self.info_widget = InfoWidget()
-        self.info_widget.setObjectName("info")  # 设置对象名称
-        self.addSubInterface(self.info_widget, FIF.GITHUB, 'About')
+        # 录音模式界面
+        self.record_widget = ASRWidget()
+        self.record_widget.setObjectName("record")
+        self.addSubInterface(self.record_widget, FIF.MICROPHONE, '录音模式')
 
-        self.navigationInterface.setExpandWidth(200)
-        self.resize(800, 600)
-
-        self.update_checker = UpdateCheckerThread(self)
-        self.update_checker.msg.connect(self.show_msg)
-        self.update_checker.start()
-
-    def show_msg(self, title, content, update_download_url):
-        w = MessageBox(title, content, self)
-        if w.exec() and update_download_url:
-            webbrowser.open(update_download_url)
-        if title == "更新":
-            sys.exit(0)
 
 def video2audio(input_file: str, output: str = "") -> bool:
     """使用ffmpeg将视频转换为音频"""
@@ -523,8 +616,7 @@ def video2audio(input_file: str, output: str = "") -> bool:
 
 def start():
     # enable dpi scale
-    QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
 
@@ -532,7 +624,9 @@ def start():
     # setTheme(Theme.DARK)  # 如果需要深色主题，取消注释此行
     window = MainWindow()
     window.show()
-    sys.exit(app.exec())
+    window.activateWindow()  # 确保窗口被激活
+    window.raise_()  # 将窗口置于最前
+    sys.exit(app.exec_())
 
 
 if __name__ == '__main__':

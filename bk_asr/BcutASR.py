@@ -38,7 +38,6 @@ class BcutASR(BaseASR):
         super().__init__(audio_path, use_cache=use_cache)
         self.session = requests.Session()
         self.task_id = None
-        self.__etags = []
 
         self.__in_boss_key: Optional[str, None] = None
         self.__resource_id: Optional[str, None] = None
@@ -49,7 +48,6 @@ class BcutASR(BaseASR):
 
         self.__etags: Optional[list[str]] = []
         self.__download_url: Optional[str, None] = None
-        self.task_id: Optional[str, None] = None
 
 
     def upload(self) -> None:
@@ -64,14 +62,8 @@ class BcutASR(BaseASR):
             "model_id": "8",
         })
 
-        resp = requests.post(
-            API_REQ_UPLOAD,
-            data=payload,
-            headers=self.headers
-        )
-        resp.raise_for_status()
-        resp = resp.json()
-        resp_data = resp["data"]
+        resp = self._make_http_request('POST', API_REQ_UPLOAD, data=payload, headers=self.headers)
+        resp_data = self._handle_response(resp, '申请上传失败')['data']
 
         self.__in_boss_key = resp_data["in_boss_key"]
         self.__resource_id = resp_data["resource_id"]
@@ -92,12 +84,7 @@ class BcutASR(BaseASR):
             start_range = clip * self.__per_size
             end_range = (clip + 1) * self.__per_size
             logging.info(f"开始上传分片{clip}: {start_range}-{end_range}")
-            resp = requests.put(
-                self.__upload_urls[clip],
-                data=self.file_binary[start_range:end_range],
-                headers=self.headers
-            )
-            resp.raise_for_status()
+            resp = self._make_http_request('PUT', self.__upload_urls[clip], data=self.file_binary[start_range:end_range], headers=self.headers)
             etag = resp.headers.get("Etag")
             self.__etags.append(etag)
             logging.info(f"分片{clip}上传成功: {etag}")
@@ -111,33 +98,24 @@ class BcutASR(BaseASR):
             "UploadId": self.__upload_id,
             "model_id": "8",
         })
-        resp = requests.post(
-            API_COMMIT_UPLOAD,
-            data=data,
-            headers=self.headers
-        )
-        resp.raise_for_status()
-        resp = resp.json()
-        self.__download_url = resp["data"]["download_url"]
+        resp = self._make_http_request('POST', API_COMMIT_UPLOAD, data=data, headers=self.headers)
+        resp_data = self._handle_response(resp, '提交上传失败')
+        self.__download_url = resp_data["data"]["download_url"]
         logging.info(f"提交成功")
 
     def create_task(self) -> str:
         """开始创建转换任务"""
-        resp = requests.post(
-            API_CREATE_TASK, json={"resource": self.__download_url, "model_id": "8"}, headers=self.headers
-        )
-        resp.raise_for_status()
-        resp = resp.json()
-        self.task_id = resp["data"]["task_id"]
+        resp = self._make_http_request('POST', API_CREATE_TASK, json={"resource": self.__download_url, "model_id": "8"}, headers=self.headers)
+        resp_data = self._handle_response(resp, '创建任务失败')
+        self.task_id = resp_data["data"]["task_id"]
         logging.info(f"任务已创建: {self.task_id}")
         return self.task_id
 
     def result(self, task_id: Optional[str] = None):
         """查询转换结果"""
-        resp = requests.get(API_QUERY_RESULT, params={"model_id": 7, "task_id": task_id or self.task_id}, headers=self.headers)
-        resp.raise_for_status()
-        resp = resp.json()
-        return resp["data"]
+        resp = self._make_http_request('GET', API_QUERY_RESULT, params={"model_id": 7, "task_id": task_id or self.task_id}, headers=self.headers)
+        resp_data = self._handle_response(resp, '查询任务失败')
+        return resp_data["data"]
 
     def _run(self):
         self.upload()
