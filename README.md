@@ -37,7 +37,6 @@ graph TB
     A --> B{选择平台}
     B -->|Bcut| C1[BcutASR]
     B -->|JianYing| C2[JianYingASR]
-    B -->|Whisper| C4[WhisperASR]
 
     subgraph 音频处理
         direction TB
