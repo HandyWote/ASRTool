@@ -28,7 +28,14 @@ API_QUERY_RESULT = API_BASE_URL + "/task/result"
 
 
 class BcutASR(BaseASR):
-    """必剪 语音识别接口"""
+    """必剪语音识别接口
+    
+    实现了必剪API的语音识别功能，包括文件上传、任务创建和结果查询等操作。
+    支持音频文件的分片上传和缓存管理。
+    
+    属性:
+        headers: HTTP请求头信息
+    """
     headers = {
         'User-Agent': 'Bilibili/1.0.0 (https://www.bilibili.com)',
         'Content-Type': 'application/json'
@@ -51,7 +58,14 @@ class BcutASR(BaseASR):
 
 
     def upload(self) -> None:
-        """申请上传"""
+        """申请上传
+        
+        向必剪API申请文件上传，获取上传所需的参数和URL。
+        处理文件分片上传和提交确认。
+        
+        Raises:
+            ValueError: 当未设置音频数据时
+        """
         if not self.file_binary:
             raise ValueError("none set data")
         payload = json.dumps({

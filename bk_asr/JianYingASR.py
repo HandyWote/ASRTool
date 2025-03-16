@@ -16,8 +16,23 @@ from .BaseASR import BaseASR
 
 
 class JianYingASR(BaseASR):
+    """剪映语音识别接口
+    
+    实现了剪映API的语音识别功能，包括文件上传、任务提交和结果查询等操作。
+    支持设置时间范围和是否需要单词级时间戳等参数。
+    """
+    
     def __init__(self, audio_path: Union[str, bytes], use_cache: bool = False, need_word_time_stamp: bool = False,
                  start_time: float = 0, end_time: float = 6000):
+        """初始化剪映ASR实例
+        
+        Args:
+            audio_path: 音频文件路径或二进制数据
+            use_cache: 是否启用缓存功能
+            need_word_time_stamp: 是否需要单词级时间戳
+            start_time: 识别起始时间（秒）
+            end_time: 识别结束时间（秒）
+        """
         super().__init__(audio_path, use_cache)
 
         self.end_time = end_time

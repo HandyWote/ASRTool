@@ -81,9 +81,20 @@ class ASRWorker(QRunnable):
                 
             logging.info(f"完成处理文件: {self.file_path} 使用引擎: {self.asr_engine}")
             save_path = self.file_path.rsplit(".", 1)[0] + "." + save_ext
-            with open(save_path, "w", encoding="utf-8") as f:
-                f.write(result_text)
-            self.signals.finished.emit(self.file_path, result_text)
+            try:
+                # 确保目录存在
+                save_dir = os.path.dirname(save_path)
+                if save_dir and not os.path.exists(save_dir):
+                    os.makedirs(save_dir, exist_ok=True)
+                    
+                logging.info(f"正在保存文件到: {save_path}")
+                with open(save_path, "w", encoding="utf-8") as f:
+                    f.write(result_text)
+                logging.info(f"文件已成功保存到: {save_path}")
+                self.signals.finished.emit(self.file_path, result_text)
+            except Exception as save_error:
+                logging.error(f"保存文件时出错: {save_path}, 错误: {str(save_error)}")
+                raise Exception(f"保存文件失败: {str(save_error)}")
         except Exception as e:
             logging.error(f"处理文件 {self.file_path} 时出错: {str(e)}")
             self.signals.errno.emit(self.file_path, f"处理时出错: {str(e)}")
@@ -590,6 +601,11 @@ class MainWindow(FluentWindow):
 
 def video2audio(input_file: str, output: str = "") -> bool:
     """使用ffmpeg将视频转换为音频"""
+    # 检查输入文件是否存在
+    if not os.path.exists(input_file):
+        logging.error(f"输入文件不存在: {input_file}")
+        return False
+
     # 创建output目录
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -604,9 +620,19 @@ def video2audio(input_file: str, output: str = "") -> bool:
         '-y',
         output
     ]
-    result = subprocess.run(cmd, capture_output=True, check=True, encoding='utf-8', errors='replace')
-
-    if result.returncode == 0 and Path(output).is_file():
+    try:
+        result = subprocess.run(cmd, capture_output=True, check=True, encoding='utf-8', errors='replace', shell=True)
+        if result.returncode == 0 and Path(output).is_file():
+            return True
+        logging.error(f"ffmpeg转换失败，返回码: {result.returncode}")
+        logging.error(f"错误输出: {result.stderr}")
+        return False
+    except subprocess.CalledProcessError as e:
+        logging.error(f"ffmpeg执行出错: {e.stderr}")
+        return False
+    except Exception as e:
+        logging.error(f"执行转换时发生错误: {str(e)}")
+        return False
         return True
     else:
         return False

@@ -11,22 +11,46 @@ from .ASRData import ASRDataSeg, ASRData
 
 
 class BaseASR:
+    """语音识别基类
+    
+    提供了基础的音频文件处理、缓存管理和HTTP请求功能。子类需要实现具体的ASR服务对接逻辑。
+    
+    属性:
+        SUPPORTED_SOUND_FORMAT: 支持的音频格式列表
+        CACHE_FILE: 缓存文件路径
+        _lock: 线程锁，用于保护缓存文件的并发访问
+    """
+    
     SUPPORTED_SOUND_FORMAT = ["flac", "m4a", "mp3", "wav"]
     CACHE_FILE = os.path.join(tempfile.gettempdir(), "bk_asr", "asr_cache.json")
     _lock = threading.Lock()
 
     def __init__(self, audio_path: [str, bytes], use_cache: bool = False):
+        """初始化ASR实例
+        
+        Args:
+            audio_path: 音频文件路径或二进制数据
+            use_cache: 是否启用缓存功能
+        """
         self.audio_path = audio_path
         self.file_binary = None
 
-        self.crc32_hex = None
+        self.crc32_hex = None  # 音频文件的CRC32校验值
         self.use_cache = use_cache
 
         self._set_data()
 
         self.cache = self._load_cache()
 
-    def _load_cache(self):
+    def _load_cache(self) -> Dict:
+        """加载缓存数据
+        
+        从缓存文件中读取历史识别结果。如果缓存文件不存在或损坏，则返回空字典。
+        使用线程锁确保并发安全。
+        
+        Returns:
+            包含历史识别结果的字典
+        """
         if not self.use_cache:
             return {}
         os.makedirs(os.path.dirname(self.CACHE_FILE), exist_ok=True)
@@ -41,7 +65,12 @@ class BaseASR:
                     return {}
             return {}
 
-    def _save_cache(self):
+    def _save_cache(self) -> None:
+        """保存缓存数据
+        
+        将当前的识别结果写入缓存文件。使用线程锁确保并发安全。
+        如果缓存文件大小超过10MB，则自动清理缓存。
+        """
         if not self.use_cache:
             return
         with self._lock:
@@ -53,7 +82,15 @@ class BaseASR:
             except IOError as e:
                 logging.error(f"Failed to save cache: {e}")
 
-    def _set_data(self):
+    def _set_data(self) -> None:
+        """设置音频数据
+        
+        读取音频文件或二进制数据，并计算CRC32校验值。
+        支持从文件路径或直接的二进制数据读取。
+        
+        Raises:
+            AssertionError: 当文件格式不支持或文件不存在时
+        """
         if isinstance(self.audio_path, bytes):
             self.file_binary = self.audio_path
         else:
@@ -65,10 +102,28 @@ class BaseASR:
         crc32_value = zlib.crc32(self.file_binary) & 0xFFFFFFFF
         self.crc32_hex = format(crc32_value, '08x')
 
-    def _get_key(self):
+    def _get_key(self) -> str:
+        """生成缓存键
+        
+        根据类名和音频文件的CRC32校验值生成唯一的缓存键。
+        
+        Returns:
+            str: 缓存键字符串
+        """
         return f"{self.__class__.__name__}-{self.crc32_hex}"
 
-    def run(self):
+    def run(self) -> ASRData:
+        """执行语音识别
+        
+        主要流程：
+        1. 检查缓存中是否存在结果
+        2. 如果没有缓存，调用具体ASR服务进行识别
+        3. 将识别结果保存到缓存
+        4. 解析识别结果生成字幕片段
+        
+        Returns:
+            ASRData: 包含识别结果的数据对象
+        """
         k = self._get_key()
         if k in self.cache and self.use_cache:
             resp_data = self.cache[k]
