@@ -28,43 +28,51 @@
 
 ```mermaid
 graph TB
-    Start[开始] --> Mode{选择模式}
-    Mode -->|普通模式| A[选择音频文件]
-    Mode -->|录音模式| Rec[开始录音]
-    Rec --> Stop[停止录音]
+    %% 定义样式
+    classDef handDrawn font-family:'Comic Sans MS',stroke-width:3px,fill:#FFF;
+    classDef startEnd fill:#4CAF50,stroke:#388E3C,color:white;
+    classDef process fill:#2196F3,stroke:#1976D2,color:white;
+    classDef decision fill:#FF9800,stroke:#F57C00,color:white;
+    classDef cache stroke-dasharray:5 5;
+    linkStyle default stroke:#666,stroke-width:2px;
+
+    %% 流程图结构
+    Start([开始]):::startEnd --> Mode{选择模式}:::decision
+    Mode -->|📁 普通模式| A[选择音频文件]:::process
+    Mode -->|🎤 录音模式| Rec[开始录音]:::process
+    Rec --> Stop[⏹️ 停止录音]:::process
     Stop --> A
+    A --> B{选择平台}:::decision
+    B -->|✂️ Bcut| C1[BcutASR]:::process
+    B -->|✂️ 剪映| C2[JianYingASR]:::process
+    C1 --> D[📦 加载音频文件]:::process
+    C2 --> D
+    D --> E[🔢 计算CRC32]:::process
+    E --> F{📥 检查缓存}:::decision
+    F -->|✅ 命中| G[返回ASRData]:::process
+    F -->|❌ 未命中| H[☁️ 调用API识别]:::process
+    H --> I1[⏫ 分片上传]:::process
+    H --> I2[⤴️ 直接提交]:::process
+    I1 --> J[🔄 轮询状态]:::process
+    I2 --> J
+    J --> K[📥 获取响应]:::process
+    K --> L[🔍 解析数据]:::process
+    L --> M[⚙️ 生成ASRData]:::process
+    M --> N[💾 保存缓存]:::process
+    N --> G
+    G --> O[📝 输出字幕]:::process
+    O --> End([结束]):::startEnd
 
-    A --> B{选择平台}
-    B -->|Bcut| C1[BcutASR]
-    B -->|JianYing| C2[JianYingASR]
-
-    subgraph 音频处理
-        direction TB
-        C1 & C2  --> D[加载音频文件]
-        D --> E[计算CRC32校验和]
-        E --> F{检查缓存}
-        F -->|命中| G[返回ASRData]
-        F -->|未命中| H[调用API识别]
+    %% 虚线框区域
+    subgraph 缓存系统
+    F
+    G
+    N
     end
 
-    subgraph API交互
-        direction TB
-        H --> I1[分片上传音频]
-        H --> I2[直接提交音频]
-        I1 & I2 --> J[轮询任务状态]
-        J --> K[获取响应数据]
-    end
-
-    subgraph 数据解析
-        direction TB
-        K --> L[解析ASRDataSeg]
-        L --> M[生成ASRData]
-        M --> N[保存到缓存]
-        N --> G
-    end
-
-    G --> O[输出字幕/文本]
-    O --> End[结束]
+    %% 样式增强
+    style 缓存系统 stroke:#9E9E9E,stroke-dasharray:5,5,fill:none
+    class F,G,N cache;
 ```
 
 ## 主要特性

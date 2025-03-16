@@ -36,6 +36,7 @@ ENV/
 # Project specific
 bk_asr/temp/
 recordings/
+releases/
 *.wav
 *.mp3
 *.m4a
